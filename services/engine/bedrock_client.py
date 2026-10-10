@@ -123,10 +123,12 @@ class BedrockClient:
         return None
 
     def _invoke_real(self, employee: Employee, event: LogEvent) -> dict:
+        # Note: `temperature` is deprecated / rejected by newer Claude models on Bedrock
+        # (e.g. Sonnet 5), which raise a ValidationException. We omit it and rely on the
+        # model default, which is fine for deterministic, low-variance verdicts.
         body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 600,
-            "temperature": 0.2,
             "system": SYSTEM_PROMPT,
             "messages": [
                 {"role": "user", "content": _build_user_prompt(employee, event)}
