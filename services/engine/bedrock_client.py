@@ -86,10 +86,16 @@ def _extract_json(text: str) -> dict:
 
 
 class BedrockClient:
-    def __init__(self) -> None:
+    def __init__(self, force_stub: bool = False) -> None:
+        """force_stub=True keeps the client in stub mode regardless of USE_REAL_BEDROCK.
+
+        Used by the data seeder: generating the baseline must never hit real Bedrock
+        (slow, costly, and would require AWS creds just to seed local demo data).
+        """
         self.model_id = config.BEDROCK_MODEL_ID
         self._runtime = None
-        if config.USE_REAL_BEDROCK:
+        self._force_stub = force_stub
+        if config.USE_REAL_BEDROCK and not force_stub:
             self._init_real()
 
     # --- real mode ---------------------------------------------------------
@@ -230,7 +236,7 @@ class BedrockClient:
 
     # --- public API --------------------------------------------------------
     def assess(self, employee: Employee, event: LogEvent) -> Assessment:
-        if config.USE_REAL_BEDROCK and self._runtime is not None:
+        if config.USE_REAL_BEDROCK and not self._force_stub and self._runtime is not None:
             try:
                 raw = self._invoke_real(employee, event)
                 model_used = f"bedrock:{self.model_id}"

@@ -46,7 +46,10 @@ def generate_baseline_events(days: int = 14) -> list[LogEvent]:
 
 def main() -> None:
     store = Store()
-    client = BedrockClient()  # stub mode is fine for seeding baseline
+    # Always use the stub for seeding: the baseline is just historical filler, so we
+    # never want to make (slow, paid) real Bedrock calls or require AWS creds here,
+    # even if USE_REAL_BEDROCK=true is set in this shell.
+    client = BedrockClient(force_stub=True)
     events = generate_baseline_events()
     print(f"Seeding {len(events)} baseline events for {len(company.employees())} employees...")
     for ev in events:
