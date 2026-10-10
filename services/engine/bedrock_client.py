@@ -33,6 +33,10 @@ but it NEVER justifies bulk data exfiltration to an external host. If you see a 
 (tens of MB or more) going to an external/public IP, treat it as a high-severity anomaly even \
 if a scheduled activity would otherwise explain the access, and say so in your reasoning.
 
+Likewise, a maintenance or patch window authorises maintenance, NOT the creation of new \
+privileged/admin accounts. Treat a privilege change or new admin account with no explicit \
+change ticket as a high-severity anomaly even if it occurs during a scheduled window.
+
 Respond with ONLY a JSON object, no prose, with exactly these keys:
 {
   "verdict": "normal" | "suspicious" | "anomaly",
@@ -189,20 +193,32 @@ class BedrockClient:
         unusual_resource = event.resource not in employee.usual_resources
         large_export = event.bytes_out > 50_000_000  # >50 MB
         external_ip = not event.source_ip.startswith(("10.", "192.168.", "172."))
+        # Privilege changes (e.g. creating an admin account) are intrinsically sensitive:
+        # being inside a maintenance window authorises patching, not minting new admins.
+        privileged_change = event.action in {"privilege_change", "account_create"}
 
-        # Does the agenda justify this event?
+        # Does the agenda justify this event? Match within the agenda window if the
+        # resource or action shares a word-stem with the entry text (tolerant to
+        # singular/plural and simple variants, e.g. "servers" vs "server patching").
+        def _stems(value: str) -> set[str]:
+            words = re.split(r"[^a-z0-9]+", value.lower())
+            return {w[:4] for w in words if len(w) >= 4}
+
         justifying = None
         for a in employee.agenda:
             if a.start <= event.timestamp <= a.end:
-                text = f"{a.title} {a.description}".lower()
-                if event.resource.split("-")[0] in text or event.action in text:
+                entry_stems = _stems(f"{a.title} {a.description}")
+                event_stems = _stems(f"{event.resource} {event.action}")
+                if entry_stems & event_stems:
                     justifying = a
                     break
         # A scheduled agenda entry justifies CONTEXT (accessing a resource at an odd
         # time), but it can never justify bulk exfiltration to an external host. Treat
         # large-export-to-external-IP as a hard signal that overrides any justification.
         hard_exfiltration = large_export and external_ip
-        agenda_justified = (justifying is not None) and not hard_exfiltration
+        agenda_justified = (
+            (justifying is not None) and not hard_exfiltration and not privileged_change
+        )
 
         risk = 0
         risk += 2 if off_hours else 0
@@ -220,6 +236,10 @@ class BedrockClient:
             verdict, severity, conf = "anomaly", "medium", 0.75
         else:
             verdict, severity, conf = "anomaly", "high", 0.9
+        if privileged_change:
+            # Minting privileged accounts without a change ticket is a high-severity
+            # anomaly regardless of agenda or hour.
+            verdict, severity, conf = "anomaly", "high", max(conf, 0.9)
         if hard_exfiltration:
             verdict, severity, conf = "anomaly", "critical", 0.96
 
@@ -243,10 +263,17 @@ class BedrockClient:
                 flags.append(f"{event.bytes_out/1e6:.0f} MB exfiltrated")
             if external_ip:
                 flags.append(f"external IP {event.source_ip}")
+            if privileged_change:
+                flags.append(f"privileged change ({event.action})")
             if hard_exfiltration and justifying is not None:
                 prefix = (
                     f"The agenda entry '{justifying.title}' authorises access, but NOT a bulk "
                     f"export to an external host. Overriding the justification. "
+                )
+            elif privileged_change and justifying is not None:
+                prefix = (
+                    f"The agenda entry '{justifying.title}' authorises maintenance, but NOT "
+                    f"creating privileged accounts. Overriding the justification. "
                 )
             else:
                 prefix = "No agenda entry justifies this. "
