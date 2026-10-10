@@ -77,6 +77,39 @@ NEW LOG EVENT TO ASSESS
 Assess this event. Return ONLY the JSON object."""
 
 
+def _text_from_payload(payload: dict) -> str:
+    """Extract the assistant text from a Bedrock Claude response, defensively.
+
+    Different Claude generations shape the response slightly differently. The modern
+    Messages format returns a `content` list of typed blocks, e.g.
+        {"content": [{"type": "text", "text": "..."}], ...}
+    but newer models may emit non-text blocks first (e.g. "thinking"/"reasoning"),
+    or omit "text" on some blocks. We scan ALL blocks and concatenate every "text"
+    field we find, instead of blindly indexing content[0]["text"] (which raised a
+    KeyError: 'text' on Sonnet 5).
+    """
+    content = payload.get("content")
+    if isinstance(content, list):
+        texts = [
+            block["text"]
+            for block in content
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
+        ]
+        if texts:
+            return "\n".join(texts)
+
+    # Fallbacks for older / alternative shapes.
+    if isinstance(payload.get("completion"), str):   # legacy text-completion models
+        return payload["completion"]
+    if isinstance(content, str):
+        return content
+
+    raise ValueError(
+        "Could not find assistant text in Bedrock response. "
+        f"Top-level keys: {list(payload.keys())}; content preview: {str(content)[:300]!r}"
+    )
+
+
 def _extract_json(text: str) -> dict:
     """Pull the first JSON object out of a model response."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -145,7 +178,7 @@ class BedrockClient:
             body=json.dumps(body),
         )
         payload = json.loads(resp["body"].read())
-        text = payload["content"][0]["text"]
+        text = _text_from_payload(payload)
         return _extract_json(text)
 
     # --- stub mode ---------------------------------------------------------
@@ -241,7 +274,10 @@ class BedrockClient:
                 raw = self._invoke_real(employee, event)
                 model_used = f"bedrock:{self.model_id}"
             except Exception as exc:  # noqa: BLE001 - fall back so demo never dies
-                print(f"[bedrock] real call failed, falling back to stub: {exc}")
+                print(
+                    f"[bedrock] real call failed, falling back to stub: "
+                    f"{type(exc).__name__}: {exc}"
+                )
                 raw = self._invoke_stub(employee, event)
                 model_used = f"stub (bedrock error: {type(exc).__name__})"
         else:
