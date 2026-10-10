@@ -35,36 +35,108 @@ The engine resolves a valid **cross-Region inference profile** from your account
 (falls back to the configured ID). A **stub mode** returns realistic verdicts with zero AWS
 credentials so the app runs anywhere; set `USE_REAL_BEDROCK=true` to call the real model.
 
-## Quick start
+## Quick start (Windows)
 
-```bash
-python -m venv .venv && source .venv/bin/activate
+> Prerequisite: Python 3.11+ installed and on your `PATH`. Check with `python --version`.
+> If `python` isn't found, try `py` (the Windows launcher) in place of `python` below.
+
+### 1. Create a virtual environment and install dependencies
+
+**PowerShell**
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+```
 
-# generate the synthetic company (employees, 2 weeks of logs, agendas)
+> If PowerShell blocks the activation script with an execution-policy error, run once:
+> `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`, then activate again.
+
+**Command Prompt (cmd.exe)**
+```bat
+python -m venv .venv
+.\.venv\Scripts\activate.bat
+pip install -r requirements.txt
+```
+
+### 2. Seed the synthetic company (employees, 2 weeks of logs, agendas)
+
+```powershell
 python -m scripts.seed_data
+```
 
-# run the three services (each in its own terminal)
+### 3. Run the three services — each in its own terminal
+
+Open **three** PowerShell/cmd windows, activate the venv in each (step 1's activate line),
+then run one service per window:
+
+```powershell
 python -m uvicorn services.engine.main:app --port 8000
+```
+```powershell
 python -m uvicorn services.user_service.main:app --port 8100
+```
+```powershell
 python -m uvicorn services.admin.main:app --port 8200
 ```
 
-Then open:
+Then open in your browser:
 - Admin console  → http://localhost:8200
 - User service   → http://localhost:8100
 
 ### Enabling the real Claude model
 
-```bash
-export USE_REAL_BEDROCK=true
-export AWS_REGION=us-east-1
-# plus your AWS credentials (env vars, SSO, or a named profile)
-export BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-5-5-20251101-v1:0   # adjust to a profile in your account
+Set the environment variables in the **same terminal** where you launch the **engine**
+(service on port 8000) *before* running it. Credentials are read by the AWS SDK (`boto3`) —
+you never paste them into the code.
+
+**PowerShell** (variables last for the current window only)
+```powershell
+$env:USE_REAL_BEDROCK = "true"
+$env:AWS_REGION = "us-east-1"
+# AWS credentials — use ONE of the following:
+#  a) access keys:
+$env:AWS_ACCESS_KEY_ID = "your-key-id"
+$env:AWS_SECRET_ACCESS_KEY = "your-secret"
+$env:AWS_SESSION_TOKEN = "your-session-token"   # only if using SSO / a temporary role
+#  b) or a named profile (after `aws sso login` / `aws configure`):
+# $env:AWS_PROFILE = "your-profile-name"
+
+# adjust to an inference profile that exists in your account (see note below):
+$env:BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-5-5-20251101-v1:0"
+
+python -m uvicorn services.engine.main:app --port 8000
 ```
 
-> Note: outbound Bedrock calls need network + AWS credentials, so run with `USE_REAL_BEDROCK=true`
-> on your own machine. In stub mode no network is required.
+**Command Prompt (cmd.exe)**
+```bat
+set USE_REAL_BEDROCK=true
+set AWS_REGION=us-east-1
+set AWS_ACCESS_KEY_ID=your-key-id
+set AWS_SECRET_ACCESS_KEY=your-secret
+set AWS_SESSION_TOKEN=your-session-token
+set BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-5-5-20251101-v1:0
+
+python -m uvicorn services.engine.main:app --port 8000
+```
+
+> Tip: to make the variables permanent across sessions, use `setx USE_REAL_BEDROCK true`
+> (etc.) — but `setx` only affects **new** terminals, not the current one. For secrets,
+> prefer setting them per-session or via a private `.env` (already git-ignored).
+
+**Before the demo, confirm the AWS side is ready:**
+- Model access must be enabled for Claude in **Bedrock → Model access** (`us-east-1`).
+- List the inference profiles actually available to you and pick a valid `BEDROCK_MODEL_ID`:
+  ```powershell
+  aws bedrock list-inference-profiles --region us-east-1 --query "inferenceProfileSummaries[?contains(inferenceProfileId,'sonnet')].inferenceProfileId"
+  ```
+
+> Notes:
+> - Outbound Bedrock calls need network + AWS credentials, so only use `USE_REAL_BEDROCK=true`
+>   on a machine that has both. In stub mode (the default) nothing is required and no network is used.
+> - If a real call fails (bad creds, model not enabled, wrong ID), the engine logs the error and
+>   automatically falls back to the stub, so the demo never crashes — the verdict will show
+>   `model: stub (bedrock error: ...)`.
 
 ## Demo flow
 
