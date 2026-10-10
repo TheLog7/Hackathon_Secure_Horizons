@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Secure Horizons — SOC Console</title>
+  <style>
+    :root {
+      --bg:#0a0d12; --panel:#131922; --panel2:#1b2330; --line:#273040;
+      --text:#e6edf3; --muted:#8b98a9; --accent:#4f8cff;
+      --green:#2ea043; --amber:#d29922; --red:#f85149; --crit:#ff2d55;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+           background:var(--bg); color:var(--text); }
+    header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex;
+             align-items:center; gap:14px; }
+    header h1 { font-size:18px; margin:0; }
+    .tag { font-size:11px; color:var(--muted); border:1px solid var(--line); padding:2px 8px; border-radius:999px; }
+    .live { color:var(--green); }
+    .stats { display:flex; gap:14px; padding:16px 24px; }
+    .stat { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+            padding:14px 18px; min-width:120px; }
+    .stat .n { font-size:26px; font-weight:700; }
+    .stat .l { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+    .stat.alerts .n { color:var(--red); }
+    .feed { padding:0 24px 24px; }
+    .feed h2 { font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+    .row { display:grid; grid-template-columns:90px 150px 1fr 120px; gap:14px; align-items:start;
+           background:var(--panel); border:1px solid var(--line); border-left-width:4px;
+           border-radius:10px; padding:12px 16px; margin-bottom:8px; animation:flash .6s ease; }
+    @keyframes flash { from { background:var(--panel2); } to { background:var(--panel); } }
+    .row.normal { border-left-color:var(--green); }
+    .row.suspicious { border-left-color:var(--amber); }
+    .row.anomaly { border-left-color:var(--red); }
+    .row.anomaly.critical { border-left-color:var(--crit); box-shadow:0 0 0 1px rgba(255,45,85,.4); }
+    .badge { font-size:11px; font-weight:700; padding:3px 8px; border-radius:999px; text-align:center; }
+    .b-normal { background:rgba(46,160,67,.15); color:var(--green); }
+    .b-suspicious { background:rgba(210,153,34,.15); color:var(--amber); }
+    .b-anomaly { background:rgba(248,81,73,.18); color:var(--red); }
+    .who { font-weight:600; }
+    .who .sub { font-weight:400; color:var(--muted); font-size:12px; }
+    .what { font-size:13px; }
+    .what .ev { color:var(--muted); font-family:ui-monospace,monospace; font-size:12px; margin-bottom:4px; }
+    .what .reason { line-height:1.45; }
+    .what .agenda { color:var(--amber); font-size:12px; margin-top:4px; }
+    .what .agenda.ok { color:var(--green); }
+    .ts { color:var(--muted); font-size:12px; text-align:right; }
+    .ts .sev { display:block; margin-top:4px; text-transform:uppercase; font-size:10px; letter-spacing:.05em; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🛡️ Secure Horizons — SOC Console</h1>
+    <span class="tag">VM1 · admin</span>
+    <span class="tag" id="status">connecting…</span>
+  </header>
+  <div class="stats">
+    <div class="stat"><div class="n" id="s-total">0</div><div class="l">Events</div></div>
+    <div class="stat"><div class="n" id="s-normal">0</div><div class="l">Normal</div></div>
+    <div class="stat"><div class="n" id="s-susp">0</div><div class="l">Suspicious</div></div>
+    <div class="stat alerts"><div class="n" id="s-alerts">0</div><div class="l">Alerts</div></div>
+  </div>
+  <div class="feed">
+    <h2>Live detection feed</h2>
+    <div id="feed"></div>
+  </div>
+
+  <script>
+    const counts = { total:0, normal:0, suspicious:0, anomaly:0 };
+    const seen = new Set();
+
+    function fmtTime(iso) {
+      return new Date(iso).toLocaleString([], {weekday:'short', hour:'2-digit', minute:'2-digit'});
+    }
+    function bytes(n) {
+      if (n >= 1e6) return (n/1e6).toFixed(0)+' MB';
+      if (n >= 1e3) return (n/1e3).toFixed(0)+' KB';
+      return n+' B';
+    }
+
+    function render(assessed, prepend) {
+      const ev = assessed.event, a = assessed.assessment;
+      if (seen.has(ev.event_id)) return;
+      seen.add(ev.event_id);
+
+      counts.total++;
+      counts[a.verdict] = (counts[a.verdict]||0)+1;
+      updateStats();
+
+      const row = document.createElement('div');
+      row.className = `row ${a.verdict}` + (a.severity==='critical' ? ' critical' : '');
+      const agendaLine = a.agenda_justified
+        ? `<div class="agenda ok">✅ Agenda-justified: ${a.agenda_reference||''}</div>`
+        : (a.verdict!=='normal' ? `<div class="agenda">⚠ No agenda justification</div>` : '');
+      row.innerHTML = `
+        <div><span class="badge b-${a.verdict}">${a.verdict}</span></div>
+        <div class="who">${ev.employee_id.replace('emp-','')}
+          <span class="sub">${ev.source_ip}</span></div>
+        <div class="what">
+          <div class="ev">${ev.action} → ${ev.resource} · ${bytes(ev.bytes_out)}</div>
+          <div class="reason">${a.reasoning}</div>
+          ${agendaLine}
+        </div>
+        <div class="ts">${fmtTime(ev.timestamp)}
+          <span class="sev">${a.severity} · ${(a.confidence*100).toFixed(0)}%</span></div>`;
+      const feed = document.getElementById('feed');
+      if (prepend && feed.firstChild) feed.insertBefore(row, feed.firstChild);
+      else feed.insertBefore(row, feed.firstChild);
+    }
+
+    function updateStats() {
+      document.getElementById('s-total').textContent = counts.total;
+      document.getElementById('s-normal').textContent = counts.normal;
+      document.getElementById('s-susp').textContent = counts.suspicious;
+      document.getElementById('s-alerts').textContent = counts.anomaly;
+    }
+
+    function connect() {
+      const status = document.getElementById('status');
+      const es = new EventSource('/api/stream');
+      es.addEventListener('assessment', e => {
+        status.innerHTML = '<span class="live">● live</span>';
+        render(JSON.parse(e.data), true);
+      });
+      es.onerror = () => { status.textContent = 'reconnecting…'; };
+    }
+    connect();
+  </script>
+</body>
+</html>

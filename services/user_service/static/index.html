@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Secure Horizons — Employee Endpoint</title>
+  <style>
+    :root {
+      --bg: #0e1116; --panel: #171c24; --panel2: #1f2630; --line: #2a3340;
+      --text: #e6edf3; --muted: #8b98a9; --accent: #4f8cff;
+      --green: #2ea043; --amber: #d29922; --red: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+           background: var(--bg); color: var(--text); }
+    header { padding: 18px 24px; border-bottom: 1px solid var(--line); display: flex;
+             align-items: center; gap: 12px; }
+    header h1 { font-size: 18px; margin: 0; }
+    .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line);
+           padding: 2px 8px; border-radius: 999px; }
+    .wrap { display: grid; grid-template-columns: 280px 1fr; gap: 0; height: calc(100vh - 59px); }
+    .sidebar { border-right: 1px solid var(--line); overflow-y: auto; padding: 12px; }
+    .emp { padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 6px;
+           border: 1px solid transparent; }
+    .emp:hover { background: var(--panel); }
+    .emp.active { background: var(--panel2); border-color: var(--accent); }
+    .emp .name { font-weight: 600; font-size: 14px; }
+    .emp .role { font-size: 12px; color: var(--muted); }
+    .main { padding: 24px; overflow-y: auto; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+            padding: 18px; margin-bottom: 18px; }
+    h2 { font-size: 15px; margin: 0 0 12px; }
+    .agenda-item { font-size: 13px; padding: 8px 10px; background: var(--panel2);
+                   border-radius: 8px; margin-bottom: 6px; border-left: 3px solid var(--accent); }
+    .agenda-item .t { color: var(--muted); font-size: 12px; }
+    .actions { display: flex; flex-direction: column; gap: 10px; }
+    button.action { text-align: left; padding: 12px 14px; border-radius: 10px; cursor: pointer;
+                    border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+                    font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+    button.action:hover { border-color: var(--accent); }
+    button.action .kind { font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+                          padding: 2px 8px; border-radius: 999px; }
+    .kind.normal { background: rgba(46,160,67,.15); color: var(--green); }
+    .kind.context { background: rgba(210,153,34,.15); color: var(--amber); }
+    .kind.malicious { background: rgba(248,81,73,.15); color: var(--red); }
+    #result { min-height: 60px; }
+    .verdict { padding: 14px; border-radius: 10px; font-size: 14px; }
+    .v-normal { background: rgba(46,160,67,.12); border: 1px solid var(--green); }
+    .v-suspicious { background: rgba(210,153,34,.12); border: 1px solid var(--amber); }
+    .v-anomaly { background: rgba(248,81,73,.12); border: 1px solid var(--red); }
+    .verdict .head { font-weight: 700; margin-bottom: 6px; }
+    .verdict .meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .hint { color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🖥️ Employee Endpoint</h1>
+    <span class="tag">VM2 · user simulation</span>
+    <span class="tag" id="engine-tag">engine: checking…</span>
+  </header>
+  <div class="wrap">
+    <div class="sidebar" id="emp-list"></div>
+    <div class="main">
+      <div id="detail"><p class="hint">Select an employee on the left to begin.</p></div>
+    </div>
+  </div>
+
+  <script>
+    let employees = [];
+    let selected = null;
+
+    async function load() {
+      employees = await (await fetch('/api/employees')).json();
+      const list = document.getElementById('emp-list');
+      list.innerHTML = '';
+      employees.forEach(e => {
+        const div = document.createElement('div');
+        div.className = 'emp';
+        div.innerHTML = `<div class="name">${e.name}</div><div class="role">${e.role} · ${e.department}</div>`;
+        div.onclick = () => select(e.employee_id);
+        list.appendChild(div);
+      });
+    }
+
+    function fmtTime(iso) {
+      const d = new Date(iso);
+      return d.toLocaleString([], {weekday:'short', hour:'2-digit', minute:'2-digit'});
+    }
+
+    function select(id) {
+      selected = employees.find(e => e.employee_id === id);
+      document.querySelectorAll('.emp').forEach((el, i) =>
+        el.classList.toggle('active', employees[i].employee_id === id));
+      renderDetail();
+    }
+
+    function renderDetail() {
+      const e = selected;
+      const agenda = e.agenda.map(a =>
+        `<div class="agenda-item"><div>${a.title}</div>
+         <div class="t">${fmtTime(a.start)} – ${fmtTime(a.end)} · ${a.description}</div></div>`).join('')
+        || '<p class="hint">No agenda entries.</p>';
+      const actions = e.actions.map(a =>
+        `<button class="action" onclick="fire('${a.key}')">
+           <span>${a.label}</span><span class="kind ${a.kind}">${a.kind}</span></button>`).join('');
+      document.getElementById('detail').innerHTML = `
+        <div class="card">
+          <h2>${e.name} — ${e.role}</h2>
+          <p class="hint">${e.department} · typical hours ${e.typical_hours}</p>
+        </div>
+        <div class="card"><h2>📅 Professional agenda</h2>${agenda}</div>
+        <div class="card"><h2>⚡ Perform an action</h2><div class="actions">${actions}</div></div>
+        <div class="card"><h2>🔎 Engine verdict</h2><div id="result"><p class="hint">Click an action to send a log event to the NDR engine.</p></div></div>
+      `;
+    }
+
+    async function fire(actionKey) {
+      const result = document.getElementById('result');
+      result.innerHTML = '<p class="hint">Sending to engine… asking the model…</p>';
+      try {
+        const r = await fetch('/api/fire', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({employee_id: selected.employee_id, action_key: actionKey})
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+        const a = data.assessment;
+        result.innerHTML = `
+          <div class="verdict v-${a.verdict}">
+            <div class="head">${a.verdict.toUpperCase()} · ${a.severity} · ${(a.confidence*100).toFixed(0)}% confidence</div>
+            <div>${a.reasoning}</div>
+            ${a.agenda_justified ? `<div class="meta">✅ Agenda-justified: ${a.agenda_reference}</div>` : ''}
+            <div class="meta">Recommended: ${a.recommended_action}</div>
+            <div class="meta">model: ${a.model_used}</div>
+          </div>`;
+      } catch (err) {
+        result.innerHTML = `<div class="verdict v-anomaly">Error: ${err.message}</div>`;
+      }
+    }
+
+    async function pingEngine() {
+      const tag = document.getElementById('engine-tag');
+      try {
+        const h = await (await fetch('/api/employees')).json(); // user svc up
+        tag.textContent = 'ready';
+      } catch { tag.textContent = 'engine: offline'; }
+    }
+
+    load().then(pingEngine);
+  </script>
+</body>
+</html>
